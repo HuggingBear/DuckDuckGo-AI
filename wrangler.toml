@@ -1,5 +1,9 @@
 name = "duckduckgo-ai"
-compatibility_date = "2023-12-01"
+compatibility_date = "2024-06-10"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+ip = "127.0.0.1"
 
 [vars]
-apikey = ""
+API_KEY = ""

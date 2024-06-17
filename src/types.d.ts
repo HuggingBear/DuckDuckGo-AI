@@ -1,3 +1,7 @@
+type ApplicationBindings = {
+  API_KEY: string
+}
+
 export interface OpenAIRequest {
   model: string
   messages: {
@@ -7,21 +11,22 @@ export interface OpenAIRequest {
   stream: boolean,
 }
 
+interface OpenAIResponseChoice {
+  "index": number,
+  "message"?: {
+    "role": string,
+    "content": string,
+  },
+  "logprobs"?: null,
+  "finish_reason"?: string
+}
 export interface OpenAIResponse {
   "id": string,
   "object": string,
   "created": number,
   "model": string,
   "system_fingerprint": string,
-  "choices": [{
-    "index": number,
-    "message"?: {
-      "role": string,
-      "content": string,
-    },
-    "logprobs"?: null,
-    "finish_reason"?: string
-  }],
+  "choices": OpenAIResponseChoice[],
   "usage": {
     "prompt_tokens": number,
     "completion_tokens": number,
@@ -29,20 +34,21 @@ export interface OpenAIResponse {
   }
 }
 
+interface OpenAIStreamResponseChoice {
+  index: number,
+  delta?: {
+    role: string,
+    content: string
+  },
+  finish_reason?: string | null,
+  content_filter_results?: null,
+}
+
 export interface OpenAIStreamResponse {
   id: string,
   object: string,
   created: number,
   model: string,
-  choices: [
-    {
-      index: number,
-      delta?: {
-        role: string,
-        content: string
-      },
-      finish_reason?: string | null,
-      content_filter_results?: null,
-    }
-  ]
+  system_fingerprint: string,
+  choices: OpenAIStreamResponseChoice[]
 }
