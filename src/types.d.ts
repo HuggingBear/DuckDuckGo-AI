@@ -1,5 +1,6 @@
 type ApplicationBindings = {
   API_KEY: string
+  CONVERSATIONS: KVNamespace
 }
 
 export interface OpenAIRequest {
@@ -36,10 +37,10 @@ export interface OpenAIResponse {
 
 interface OpenAIStreamResponseChoice {
   index: number,
-  delta?: {
+  delta: {
     role: string,
     content: string
-  },
+  } | {},
   finish_reason?: string | null,
   content_filter_results?: null,
 }

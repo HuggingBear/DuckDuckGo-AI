@@ -7,3 +7,7 @@ ip = "127.0.0.1"
 
 [vars]
 API_KEY = ""
+
+[[kv_namespaces]]
+binding = "CONVERSATIONS"
+id = "YOUR_KV_NAMESPACE_ID"

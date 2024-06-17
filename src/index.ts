@@ -4,6 +4,7 @@ import { validator } from 'hono/validator';
 import { ApplicationBindings, OpenAIRequest, OpenAIResponse, OpenAIStreamResponse } from './types';
 import { SSEStreamingApi, streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
+import { generateConversationHash, getConversationId, saveConversationId } from './conversation';
 
 const headers = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36",
@@ -113,7 +114,7 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
   if (API_KEY) {
     const authorization = c.req.header('Authorization');
     if (!authorization || `Bearer ${API_KEY}` !== authorization) {
-      return c.json({ error: 'authorization error' }, 401);
+      return c.json({ error: 'Authorization required' }, 401);
     }
   }
 
@@ -122,6 +123,7 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
     model: params.model,
     messages: params.messages.map(({ role, content }) => ({ role: role === 'system' ? 'user' : role, content })),
   };
+  const userMessages = requestParams.messages.map(m => m.content);
 
   // Provided in request or create a new one
   let conversationId: string | undefined;
@@ -132,12 +134,25 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
     conversationId = c.req.header('x-vqd-4');
 
     if (!conversationId) {
-      conversationId = await createNewConversationId() || '';
+      // Strip the last user input and try restore the conversation id from the database by using conversation hash.
+      const previousConversationHash = await generateConversationHash(userMessages.slice(0, userMessages.length - 1));
+      const previousConversationId = await getConversationId(c.env.CONVERSATIONS, previousConversationHash);
+
+      if (previousConversationId) {
+        conversationId = previousConversationId;
+
+        console.debug('Using cached conversation id: ', conversationId);
+      } else {
+        conversationId = await createNewConversationId() || '';
+        console.debug('Created new conversation id: ', conversationId);
+      }
 
       // API doesn not return new conversation id, we might been blocked
       if (!conversationId || conversationId === '') {
-        return c.json({ error: 'x-xqd-4 get error' }, 400);
+        return c.json({ error: 'Cannot obtain new x-xqd-4 and it was not provided nor cached' }, 503);
       }
+    } else {
+      console.debug('Using provided conversation id: ', conversationId);
     }
 
     const chatResponse = await fetch(chatURL, {
@@ -147,31 +162,103 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
     });
 
     if (!chatResponse.ok) {
-      return c.json({ error: 'api request error', message: await chatResponse.text() }, 400);
+      return c.json({ error: 'Remote API error', message: await chatResponse.text() }, 503);
     }
 
 
-    newConversationId = chatResponse.headers.get('x-vqd-4') ?? undefined;
-    c.header('x-vqd-4', newConversationId ?? '');
+    newConversationId = chatResponse.headers.get('x-vqd-4') ?? '';
+    c.header('x-vqd-4', newConversationId);
+    
+    console.debug('New conversation id: ', newConversationId);
 
     // Stream response or normal response
     const isStream = params.stream;
-    const body = chatResponse.body;
+    const aiResponse = chatResponse.body;
 
-    if (isStream && body) {
-      return createStreamResponse(c, params.model, body);
-    } else if (body) {
-      return createNormalResponse(c, params.model, body);
+    if (isStream && aiResponse) {
+      console.debug('Using stream API');
+      return createStreamResponse(c, params.model, userMessages, newConversationId, aiResponse);
+    } else if (aiResponse) {
+      console.debug('Using normal API');
+      return createNormalResponse(c, params.model, userMessages, newConversationId, aiResponse);
     } else {
       return c.json({ error: 'Unable to parse response' }, 500);
     }
-  } catch (e) {
-    console.error('Error reading from SSE stream:', e);
-    return c.json({ error: e }, 400);
+  } catch (error) {
+    console.error('Unknwon error:', error);
+    return c.json({ error }, 500);
   }
 }
 
-async function createStreamResponse(c: AppContext, model: string, aiResponse: ReadableStream<Uint8Array>) {
+async function createStreamResponse(c: AppContext, model: string, userMessages: string[], conversationId: string, aiResponse: ReadableStream<Uint8Array>) {
+  let messagePars: string[] = [];
+
+  // Inline function to handle stream responses and process conversation id
+  async function handleStreamResponsePart(destinationStream: SSEStreamingApi, part: string, model: string) {
+  
+    try {
+      const {action, role, message} = JSON.parse(part);
+  
+      const ddgAIResponse: OpenAIStreamResponse = {
+        id: 'chatcmpl-duckduck-ai',
+        object: 'chat.completion.chunk',
+        created: Math.floor((new Date()).getTime() / 1000),
+        model,
+        system_fingerprint: 'fp_44709d6fcb',
+        choices: [],
+      };
+  
+      if (message) {
+        ddgAIResponse.choices.push({
+          index: 0,
+          delta: {
+            role,
+            content: message,
+          },
+          finish_reason: null,
+          content_filter_results: null,
+        });
+
+        // Save current message for next iteration to calculate conversation hash
+        messagePars.push(message);
+  
+        await destinationStream.writeSSE({ data: JSON.stringify(ddgAIResponse) });
+  
+        return;
+        
+        /*
+         * 2024/06/17 It seems the target is not standard OpenAI API.
+         * Couldn't reproduce stream messages ends with [DONE], but object without a message field or empty message
+         */
+      } else if (
+        part === '[DONE]' ||
+        (action === 'success' && typeof message === 'undefined') ||
+        (action === 'success' && message === '')
+      ) {
+        ddgAIResponse.choices.push({
+          index: 0,
+          finish_reason: 'stop',
+          content_filter_results: null,
+          delta: {},
+        });
+  
+        // Combine user's message and last complete message to calculate conversation hash
+        const conversationHash = await generateConversationHash([...userMessages, messagePars.join('')]);
+        await saveConversationId(c.env.CONVERSATIONS, conversationHash, conversationId);
+
+        console.debug('Saved conversation hash: ', conversationHash);
+
+        await destinationStream.writeSSE({ data: JSON.stringify(ddgAIResponse) });
+        // await destinationStream.writeSSE({ data: '[DONE]' });
+      } else {
+        throw new Error('Unknown stream response part');
+      }
+    } catch (error) {
+      // TODO: Should this be handled?
+      // console.debug('Response parse error', error);
+    }
+  }
+
   return streamSSE(c, async (stream) => {
     const reader = aiResponse.getReader();
     const decoder = new TextDecoder();
@@ -191,7 +278,7 @@ async function createStreamResponse(c: AppContext, model: string, aiResponse: Re
 
         for (let part of parts) {
           part = part.substring(6);
-          await handleOpenAIStreamResponsePart(stream, part, model);
+          await handleStreamResponsePart(stream, part, model);
         }
       }
     } finally {
@@ -200,7 +287,7 @@ async function createStreamResponse(c: AppContext, model: string, aiResponse: Re
   });
 }
 
-async function createNormalResponse(c: AppContext, model: string, aiResponse: ReadableStream<Uint8Array>): Promise<Response> {
+async function createNormalResponse(c: AppContext, model: string, userMessage: string[], conversationId: string, aiResponse: ReadableStream<Uint8Array>): Promise<Response> {
   async function readStream(body: ReadableStream<Uint8Array>): Promise<string> {
     const reader = body.getReader();
     let buffer = '';
@@ -260,54 +347,13 @@ async function createNormalResponse(c: AppContext, model: string, aiResponse: Re
     },
   };
 
+
+  const conversationHash = await generateConversationHash([...userMessage, responseContent]);
+  await saveConversationId(c.env.CONVERSATIONS, conversationHash, conversationId);
+
+  console.debug('Saved conversation hash: ', conversationHash)
+
   return c.json(openAIResponse);
-}
-
-async function handleOpenAIStreamResponsePart(destinationStream: SSEStreamingApi, part: string, model: string) {
-  part = part.substring(6);
-
-  try {
-    const response = JSON.parse(part);
-
-    const openAIResponse: OpenAIStreamResponse = {
-      id: 'chatcmpl-duckduck-ai',
-      object: 'chat.completion',
-      created: (new Date()).getTime() / 1000,
-      model,
-      system_fingerprint: 'fp_44709d6fcb',
-      choices: [],
-    };
-
-    if (response['message']) {
-      openAIResponse.choices.push({
-        index: 0,
-        delta: {
-          role: response['role'],
-          content: response['message'],
-        },
-        finish_reason: null,
-        content_filter_results: null,
-      });
-
-      await destinationStream.writeSSE({ data: JSON.stringify(openAIResponse) });
-
-      return;
-    } else if (part === '[DONE]') {
-      openAIResponse.choices.push({
-        index: 0,
-        finish_reason: 'stop',
-        content_filter_results: null,
-        delta: undefined,
-      });
-
-      await destinationStream.writeSSE({ data: JSON.stringify(openAIResponse) });
-      await destinationStream.writeSSE({ data: '[DONE]' });
-    } else {
-      throw new Error('Unknown stream response part');
-    }
-  } catch (error) {
-    console.error('Response parse error', error);
-  }
 }
 
 // Register routes
