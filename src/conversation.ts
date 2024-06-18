@@ -1,3 +1,5 @@
+import { hashString } from "./utils";
+
 /**
  * Generates a SHA-256 hash of an array of messages.
  *
@@ -5,11 +7,7 @@
  * @return {Promise<string>} A Promise that resolves to the generated hash as a hexadecimal string.
  */
 export async function generateConversationHash(messages: string[]): Promise<string> {
-    
-    const binaryData = new TextEncoder().encode(messages.join(','));
-    const hashHex = await crypto.subtle.digest('SHA-256', binaryData).then(hashBuffer => {
-        return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');  
-    }); 
+    const hashHex = await hashString(messages.join(','), 'SHA-256')
     
     return new Promise((resolve) => resolve(hashHex));
 }

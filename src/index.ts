@@ -5,6 +5,7 @@ import { ApplicationBindings, OpenAIRequest, OpenAIResponse, OpenAIStreamRespons
 import { SSEStreamingApi, streamSSE } from 'hono/streaming';
 import { cors } from 'hono/cors';
 import { generateConversationHash, getConversationId, saveConversationId } from './conversation';
+import { hashString } from './utils';
 
 const headers = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36",
@@ -138,6 +139,9 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
       const previousConversationHash = await generateConversationHash(userMessages.slice(0, userMessages.length - 1));
       const previousConversationId = await getConversationId(c.env.CONVERSATIONS, previousConversationHash);
 
+      console.debug('Previous conversion hash: ', previousConversationHash, userMessages.slice(0, userMessages.length - 1));
+      console.debug('Previous conversation id: ', previousConversationId);
+
       if (previousConversationId) {
         conversationId = previousConversationId;
 
@@ -168,8 +172,8 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
 
     newConversationId = chatResponse.headers.get('x-vqd-4') ?? '';
     c.header('x-vqd-4', newConversationId);
-    
-    console.debug('New conversation id: ', newConversationId);
+
+    console.debug('Next conversation id: ', newConversationId);
 
     // Stream response or normal response
     const isStream = params.stream;
@@ -191,25 +195,49 @@ async function handleChatCompletionsRoute(c: AppContext): Promise<Response | und
 }
 
 async function createStreamResponse(c: AppContext, model: string, userMessages: string[], conversationId: string, aiResponse: ReadableStream<Uint8Array>) {
-  let messagePars: string[] = [];
+  let messageParts: string[] = [];
+  // Cache last stream parts in case the next stream part was finish without a message
+  let lastMessagePartResponse: OpenAIStreamResponse | undefined;
+  // Remember has the response been done, prevent multiple [DONE] being repeated when
+  // there are multiple empty message response at the end.
+  let responseHasDone = false;
 
   // Inline function to handle stream responses and process conversation id
-  async function handleStreamResponsePart(destinationStream: SSEStreamingApi, part: string, model: string) {
-  
+  async function handleStreamResponsePart(destinationStream: SSEStreamingApi, serverStreamPart: string, model: string) {
+    if (responseHasDone) {
+      return
+    }
+    
     try {
-      const {action, role, message} = JSON.parse(part);
-  
-      const ddgAIResponse: OpenAIStreamResponse = {
-        id: 'chatcmpl-duckduck-ai',
+      const { action, role, message } = JSON.parse(serverStreamPart);
+
+      const newClientResponse: OpenAIStreamResponse = {
+        id: 'chatcmpl-duckduckgo-ai',
         object: 'chat.completion.chunk',
         created: Math.floor((new Date()).getTime() / 1000),
         model,
-        system_fingerprint: 'fp_44709d6fcb',
+        system_fingerprint: await getModelFingerprint(model),
         choices: [],
       };
-  
+
+      
+      /*
+        * 2024/06/17 It seems the target is not standard OpenAI API.
+        * Claude model might have multiple empty message then [DONE]
+        * OpenAI model might have object without message field and [DONE]
+        * Llama3 model might have empty message without [DONE]
+        */
+      const successWithNoMessage = action === 'success' && typeof message === 'undefined';
+      const successWithEmptyMessage = action === 'success' && message === '';
+      const emptyStreamMessage = serverStreamPart.trim() === '';
+      
       if (message) {
-        ddgAIResponse.choices.push({
+        // Emit cached stream parts as we know there are at least one more message
+        if (lastMessagePartResponse) {
+          await destinationStream.writeSSE({ data: JSON.stringify(lastMessagePartResponse) });
+        }
+
+        newClientResponse.choices.push({
           index: 0,
           delta: {
             role,
@@ -220,36 +248,54 @@ async function createStreamResponse(c: AppContext, model: string, userMessages: 
         });
 
         // Save current message for next iteration to calculate conversation hash
-        messagePars.push(message);
-  
-        await destinationStream.writeSSE({ data: JSON.stringify(ddgAIResponse) });
-  
+        messageParts.push(message);
+
+        lastMessagePartResponse = newClientResponse;
+
         return;
-        
-        /*
-         * 2024/06/17 It seems the target is not standard OpenAI API.
-         * Couldn't reproduce stream messages ends with [DONE], but object without a message field or empty message
-         */
-      } else if (
-        part === '[DONE]' ||
-        (action === 'success' && typeof message === 'undefined') ||
-        (action === 'success' && message === '')
-      ) {
-        ddgAIResponse.choices.push({
+
+      } else if ((successWithNoMessage || successWithEmptyMessage) && !emptyStreamMessage) {
+        if (lastMessagePartResponse) {
+          lastMessagePartResponse.choices[0].finish_reason = 'stop';
+        }
+
+        if (messageParts.length !== 0) {
+          
+          // Combine user's message and last complete message to calculate conversation hash
+          const conversationHash = await generateConversationHash([...userMessages, messageParts.join('')]);
+          await saveConversationId(c.env.CONVERSATIONS, conversationHash, conversationId);
+
+          console.debug('Saved conversation hash (1): ', conversationHash);
+        }
+
+        await destinationStream.writeSSE({ data: JSON.stringify(lastMessagePartResponse) });
+        await destinationStream.writeSSE({ data: '[DONE]' });
+
+        responseHasDone = true;
+      } else if (serverStreamPart === '[DONE]') {
+        if (lastMessagePartResponse) {
+          await destinationStream.writeSSE({ data: JSON.stringify(lastMessagePartResponse) });
+        }
+
+        newClientResponse.choices.push({
           index: 0,
           finish_reason: 'stop',
           content_filter_results: null,
           delta: {},
         });
-  
-        // Combine user's message and last complete message to calculate conversation hash
-        const conversationHash = await generateConversationHash([...userMessages, messagePars.join('')]);
-        await saveConversationId(c.env.CONVERSATIONS, conversationHash, conversationId);
 
-        console.debug('Saved conversation hash: ', conversationHash);
+        if (messageParts.length !== 0) {
+          // Combine user's message and last complete message to calculate conversation hash
+          const conversationHash = await generateConversationHash([...userMessages, messageParts.join('')]);
+          await saveConversationId(c.env.CONVERSATIONS, conversationHash, conversationId);
 
-        await destinationStream.writeSSE({ data: JSON.stringify(ddgAIResponse) });
-        // await destinationStream.writeSSE({ data: '[DONE]' });
+          console.debug('Saved conversation hash (2): ', conversationHash);
+        }
+
+        await destinationStream.writeSSE({ data: JSON.stringify(newClientResponse) });
+        await destinationStream.writeSSE({ data: '[DONE]' });
+
+        responseHasDone = true;
       } else {
         throw new Error('Unknown stream response part');
       }
@@ -324,11 +370,11 @@ async function createNormalResponse(c: AppContext, model: string, userMessage: s
   }
 
   const openAIResponse: OpenAIResponse = {
-    id: 'chatcmpl-duckduck-ai',
+    id: 'chatcmpl-duckduckgo-ai',
     object: 'chat.completion',
-    created: (new Date()).getTime() / 1000,
+    created: Math.floor((new Date()).getTime() / 1000),
     model,
-    system_fingerprint: 'fp_44709d6fcb',
+    system_fingerprint: await getModelFingerprint(model),
     choices: [
       {
         index: 0,
@@ -354,6 +400,14 @@ async function createNormalResponse(c: AppContext, model: string, userMessage: s
   console.debug('Saved conversation hash: ', conversationHash)
 
   return c.json(openAIResponse);
+}
+
+/**
+ * A definitely wrong implement of system fingerpinting algo
+ * @param modelName {string}
+ */
+async function getModelFingerprint(modelName: string) {
+  return `fp_${(await hashString(modelName, 'SHA-1')).slice(0, 9)}`;
 }
 
 // Register routes
