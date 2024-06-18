@@ -1,22 +1,24 @@
-# DuckDuckGo AI
+# DuckDuckGo AI API
 
-[中文说明](README.zh.md)
+> This is a heavily modified fork of [duckduckgo-ai](https://github.com/anhao/duckduckgo-ai).
 
-Deploy a free DuckDuckGo AI API using Cloudflare Worker, supporting models like **gpt-3.5-turbo-0125**,**claude-3-haiku-20240307**, ...
+Yet another DuckDuckGo AI reverse engineering API running on Cloudflare Worker.
 
 DuckDuckGo AI: https://duckduckgo.com/?q=DuckDuckGo&ia=chat
 
 ## Deployment
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/anhao/duckduckgo-ai)
+1. Clone the repo.
+2. Install dependencies by running `npm i`, configure KV storage and API_KEY to protect this deployment.
+3. Deploy to Cloudflare Worker by running `npm run deploy`.
+4. Open the worker URL in the browser and enjoy!
 
+**Warning: If API_KEY is not set, your API will be publicly accessible.**
 
-```shell
-git clone https://github.com/anhao/duckduckgo-ai.git
-cd duckduckgo-ai
-npm install
-npm run deploy
-```
+Configure API_KEY and KV storage:
+1. Open `wrangler.toml` with your editor.
+2. Fill in your own API_KEY (Actually a password), for example: sk-my-private-api-do-not-use.
+3. Fill in your own KV storage ID, create and find it in your Cloudflare console.
 
 ## Supported Models
 
@@ -29,32 +31,61 @@ npm run deploy
 
 Replace **worker_url** with your own:
 
+Create conversation:
 ```shell
 curl https://worker_url/v1/chat/completions \
--H "Authorization: Bearer $YOU_APIKEY" \
+-H "Authorization: Bearer $MY_WORKER_APIKEY" \
 -H "Content-Type: application/json" \
 -d '{
-    "model": "gpt-3.5-turbo-0125",
-    "messages": [{"role": "user", "content": "Hello"}],
+  "model": "meta-llama/Llama-3-70b-chat-hf",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Yo"
+    }
+  ]
 }'
 ```
 
-## Authorization Access
+Response:
+> Note: The worker will attempt to save and restore the x-vqd-4 header by hashing your chat history, but it's not guaranteed to work.
+> You should manually obtain it from the response header and pass it in the next request to ensure continuous chat functionality.
 
-In the `wrangler.toml` file, set the value of the `apikey` parameter. If not set, anyone can make requests.
+```HTTP
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Vary: Accept-Encoding
+x-vqd-4: 4-974561083254981360721938476051293847215
+Server: cloudflare
 
+{
+  "id": "chatcmpl-duckduckgo-ai",
+  "object": "chat.completion",
+  "created": 1718720705,
+  "model": "meta-llama/Llama-3-70b-chat-hf",
+  "system_fingerprint": "fp_e7692cea7",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Yo! What's up?"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}
 ```
-[vars]
-apikey = "" ## Set the apikey value, if not set, anyone can make requests.
-```
 
-## Known Issues
+## Known Limits
 
-Currently, it does not support continuous dialogue, meaning the `messages` can only be passed once.
+### Conversation with more than one prompt message
 
-If you want to pass multiple messages, you need to manually pass the `x-vqd-4` parameter value to the request header.
-
-The `x-vqd-4` parameter will be returned in the response header after the first dialogue, and subsequent requests need
-to pass the `x-vqd-4` value. A new `x-vqd-4` parameter is required for each new dialogue added.
-
-- [ ] Automatically pass the **x-vqd-4** by storing the conversation **hash** in **Cloudflare KV**
+DuckDuckGo AI requires the x-vqd-4 header to continue your conversation from the last response. The worker will try to save and restore it by hashing your messages, but this might cause issues when multiple persons send exactly the same message or your client application does not bring all history messages.
+You should obtain the x-vqd-4 header from the response header and pass it when you need to continue the conversation.
