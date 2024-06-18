@@ -1,14 +1,22 @@
 {
-  "scripts": {
-    "dev": "wrangler dev src/index.ts",
-    "deploy": "wrangler deploy --minify src/index.ts"
-  },
-  "dependencies": {
-    "hono": "^4.4.4",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240529.0",
-    "wrangler": "^3.57.2"
-  }
+    "name": "duckduckgo-ai",
+    "version": "1.0.0",
+    "description": "Deploy a free DuckDuckGo AI API using Cloudflare Worker",
+    "license": "GPL-3.0-only",
+    "scripts": {
+        "dev": "wrangler dev src/index.ts",
+        "deploy": "wrangler deploy --minify src/index.ts",
+        "prettier:lint": "prettier --check ./src",
+        "prettier:fix": "prettier --write ./src",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "dependencies": {
+        "hono": "^4.4.6",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^4.20240614.0",
+        "wrangler": "^3.60.3",
+        "prettier": "^3.3.2"
+    }
 }

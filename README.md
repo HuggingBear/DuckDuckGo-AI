@@ -2,7 +2,7 @@
 
 [中文说明](README.zh.md)
 
-Deploy a free DuckDuckGo AI using Cloudflare Worker, supporting models like **gpt-3.5-turbo-0125**,**claude-3-haiku-20240307**, ...
+Deploy a free DuckDuckGo AI API using Cloudflare Worker, supporting models like **gpt-3.5-turbo-0125**,**claude-3-haiku-20240307**, ...
 
 DuckDuckGo AI: https://duckduckgo.com/?q=DuckDuckGo&ia=chat
 

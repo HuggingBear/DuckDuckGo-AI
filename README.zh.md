@@ -1,6 +1,6 @@
 # DuckDuckGo  AI
 
-使用 Cloudflare Worker 部署免费 DuckDuckGo AI,支持 **gpt-3.5-turbo-0125**,**claude-3-haiku-20240307** 等模型
+使用 Cloudflare Worker 部署免费 DuckDuckGo AI API,支持 **gpt-3.5-turbo-0125**,**claude-3-haiku-20240307** 等模型
 
 DuckDuckGo AI : https://duckduckgo.com/?q=DuckDuckGo&ia=chat
 

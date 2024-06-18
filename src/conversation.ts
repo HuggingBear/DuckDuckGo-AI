@@ -7,11 +7,10 @@ import { hashString } from "./utils";
  * @return {Promise<string>} A Promise that resolves to the generated hash as a hexadecimal string.
  */
 export async function generateConversationHash(messages: string[]): Promise<string> {
-    const hashHex = await hashString(messages.join(','), 'SHA-256')
-    
+    const hashHex = await hashString(messages.join(","), "SHA-256");
+
     return new Promise((resolve) => resolve(hashHex));
 }
-
 
 /**
  * Saves conversation information to a KVNamespace with a specified expiration time.
@@ -22,7 +21,9 @@ export async function generateConversationHash(messages: string[]): Promise<stri
  * @return {Promise<void>} A Promise that resolves when the conversation information is successfully saved.
  */
 export async function saveConversationId(kvNamespace: KVNamespace, messagesHash: string, conversationId: string): Promise<void> {
-    return await kvNamespace.put(messagesHash, conversationId, { expirationTtl: 24 * 60 * 60 });
+    return await kvNamespace.put(messagesHash, conversationId, {
+        expirationTtl: 24 * 60 * 60
+    });
 }
 
 /**
