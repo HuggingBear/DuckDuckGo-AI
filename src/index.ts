@@ -43,7 +43,7 @@ const schema = z.object({
 const models = [
     'gpt-4o-mini',
     'claude-3-haiku-20240307',
-    'meta-llama/Llama-3-70b-chat-hf',
+    'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
     'mistralai/Mixtral-8x7B-Instruct-v0.1'
 ];
 
