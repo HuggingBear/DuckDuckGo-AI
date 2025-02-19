@@ -22,10 +22,11 @@ Configure API_KEY and KV storage:
 
 ## Supported Models
 
-- gpt-3.5-turbo-0125
+- gpt-4o-mini
 - claude-3-haiku-20240307
-- meta-llama/Llama-3-70b-chat-hf
-- mistralai/Mixtral-8x7B-Instruct-v0.1
+- meta-llama/Llama-3.3-70B-Instruct-Turbo
+- o3-mini
+- mistralai/Mistral-Small-24B-Instruct-2501
 
 ## Usage
 
@@ -37,7 +38,7 @@ curl https://worker_url/v1/chat/completions \
 -H "Authorization: Bearer $MY_WORKER_APIKEY" \
 -H "Content-Type: application/json" \
 -d '{
-  "model": "meta-llama/Llama-3-70b-chat-hf",
+  "model": "o3-mini",
   "messages": [
     {
       "role": "user",
@@ -62,7 +63,7 @@ Server: cloudflare
   "id": "chatcmpl-duckduckgo-ai",
   "object": "chat.completion",
   "created": 1718720705,
-  "model": "meta-llama/Llama-3-70b-chat-hf",
+  "model": "o3-mini",
   "system_fingerprint": "fp_e7692cea7",
   "choices": [
     {

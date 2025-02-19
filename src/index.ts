@@ -8,11 +8,11 @@ import { generateConversationHash, getConversationId, saveConversationId } from 
 import { hashString } from "./utils";
 
 const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
     "Accept": "text/event-stream",
     "Accept-Language": "de,en-US;q=0.7,en;q=0.3",
     "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://duckduckgo.com/?q=DuckDuckGo&ia=chat",
+    "Referer": "https://duckduckgo.com/?q=DuckDuckGo+AI+Chat&ia=chat&duckai=1",
     "Content-Type": "application/json",
     "Origin": "https://duckduckgo.com",
     "Connection": "keep-alive",
@@ -43,8 +43,9 @@ const schema = z.object({
 const models = [
     'gpt-4o-mini',
     'claude-3-haiku-20240307',
-    'meta-llama/Llama-3-70b-chat-hf',
-    'mistralai/Mixtral-8x7B-Instruct-v0.1'
+    'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    'o3-mini',
+    'mistralai/Mistral-Small-24B-Instruct-2501'
 ];
 
 type AppContext = Context<{ Bindings: ApplicationBindings }>;
